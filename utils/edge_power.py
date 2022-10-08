@@ -4,37 +4,32 @@ from skimage.segmentation import find_boundaries
 from copy import deepcopy
 from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
+import json
 
 
-def show_visualize(imgray, maskgray, thick, normal_vector, edge_element, grid_z0, grid_z1, grid_z2):
-    plt.subplot(241)
+def show_visualize(imgray, maskgray, thick, normal_vector, edge_element, grid, interpolate):
+    plt.subplot(231)
     plt.imshow(imgray, cmap='gray')
     plt.title('image')
-    plt.subplot(242)
+    plt.subplot(232)
     plt.imshow(maskgray, cmap='gray')
     plt.title('mask')
-    plt.subplot(243)
+    plt.subplot(233)
     plt.imshow(thick, cmap='gray')
     plt.title('boundary')
-    plt.subplot(244)
+    plt.subplot(234)
     plt.imshow(cv2.convertScaleAbs(normal_vector,
                alpha=255/normal_vector.max()), cmap='gray')
     plt.title('normal_vector')
-    plt.subplot(245)
+    plt.subplot(235)
     temp_edge_element = deepcopy(edge_element)
     temp_edge_element[~thick.astype('bool')] = 0
     plt.imshow(temp_edge_element, cmap='gray')
     plt.title('edge_element')
-    plt.subplot(246)
-    plt.imshow(np.flip(grid_z0.T, 0), extent=(0, 255, 0, 255), cmap='gray')
-    plt.title('Nearest')
-    plt.subplot(247)
-    plt.imshow(np.flip(grid_z1.T, 0), extent=(0, 255, 0, 255), cmap='gray')
-    plt.title('Linear')
-    plt.subplot(248)
-    plt.imshow(np.flip(grid_z2.T, 0), extent=(0, 255, 0, 255), cmap='gray')
-    plt.title('Cubic')
-    plt.gcf().set_size_inches(16, 8)
+    plt.subplot(236)
+    plt.imshow(np.flip(grid.T, 0), extent=(0, 255, 0, 255), cmap='gray')
+    plt.title(interpolate)
+    plt.gcf().set_size_inches(12, 8)
     plt.show()
 
 
@@ -45,15 +40,11 @@ def calculate_edge_power(thick, grid_z2):
     return edge_power_mean, edge_power_sum
 
 
-def interpolate_edge_vector(points, values):
+def interpolate_edge_vector(points, values, interpolate='cubic'):
     grid_x, grid_y = np.mgrid[0:255:256j, 0:255:256j]
-    grid_z0 = griddata(points, values, (grid_x, grid_y),
-                       method='nearest', fill_value=0, rescale=True)
-    grid_z1 = griddata(points, values, (grid_x, grid_y),
-                       method='linear', fill_value=0, rescale=True)
-    grid_z2 = griddata(points, values, (grid_x, grid_y),
-                       method='cubic', fill_value=0, rescale=True)
-    return grid_z0, grid_z1, grid_z2
+    grid =  griddata(points, values, (grid_x, grid_y),
+                        method=interpolate, fill_value=0, rescale=True)
+    return grid
 
 
 def get_edge_vectors(thick, edge_element):
@@ -90,6 +81,7 @@ def read_image(img_path):
     mask_path = img_path[:-3] + 'png'
     image = cv2.imread(img_path)
     img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    img = cv2.resize(img, (256, 256))
     imgray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     imgray = cv2.resize(imgray, (256, 256))
     mask = cv2.imread(mask_path)
@@ -98,10 +90,14 @@ def read_image(img_path):
     thick = find_boundaries(maskgray, mode='thick')
     return img, imgray, maskgray, thick
 
-def get_edge_power(img_path, color=False, filter='scharr', visualize=True):
+
+def get_edge_power(img_path, filter='scharr', interpolate='cubic', color=False, visualize=True):
 
     # Read image and its mask
     img, imgray, maskgray, thick = read_image(img_path)
+    
+    if np.sum(maskgray) == 0:
+        return 0, 0, 0
 
     # Get the image's normal vector
     if filter == 'steering':
@@ -125,7 +121,7 @@ def get_edge_power(img_path, color=False, filter='scharr', visualize=True):
     # Get all edge vectors
     points, values = get_edge_vectors(thick, edge_element)
     # Interpolate edge vectors
-    grid_z0, grid_z1, grid_z2 = interpolate_edge_vector(points, values)
+    grid = interpolate_edge_vector(points, values, interpolate)
 
     if visualize:
         if color:
@@ -133,10 +129,42 @@ def get_edge_power(img_path, color=False, filter='scharr', visualize=True):
         else:
             image = imgray
         show_visualize(image, maskgray, thick, normal_vector,
-                       edge_element, grid_z0, grid_z1, grid_z2)
-    edge_power_mean, edge_power_sum = calculate_edge_power(thick, grid_z0)
-    print('Nearest: mean: {:.4f}, sum: {:.4f}, overall: {:.4f}'.format(edge_power_mean, edge_power_sum, edge_power_mean*edge_power_sum))
-    edge_power_mean, edge_power_sum = calculate_edge_power(thick, grid_z1)
-    print('Nearest: mean: {:.4f}, sum: {:.4f}, overall: {:.4f}'.format(edge_power_mean, edge_power_sum, edge_power_mean*edge_power_sum))
-    edge_power_mean, edge_power_sum = calculate_edge_power(thick, grid_z2)
-    print('Nearest: mean: {:.4f}, sum: {:.4f}, overall: {:.4f}'.format(edge_power_mean, edge_power_sum, edge_power_mean*edge_power_sum))
+                       edge_element, grid, interpolate)
+    # if interpolate == 'cubic':
+    #     grid = grid_z2
+    # elif interpolate == 'linear':
+    #     grid = grid_z1
+    # else:
+    #     grid = grid_z0
+    edge_power_mean, edge_power_sum = calculate_edge_power(thick, grid)
+    print('{}: mean: {:.4f}, sum: {:.4f}, overall: {:.4f}'.format(
+        interpolate, edge_power_mean, edge_power_sum, edge_power_mean*edge_power_sum))
+
+    return edge_power_mean, edge_power_sum, edge_power_mean*edge_power_sum
+
+def get_edge_power_json(p):
+    cat = [x for x in p.iterdir() if x.is_dir()]
+
+    result = {}
+
+    for c in cat:
+        if str(c) not in result:
+            result[str(c)] = {}
+        subcat = [x for x in c.iterdir() if x.is_dir()]
+        for sc in subcat:
+            if str(sc) not in result[str(c)]:
+                result[str(c)][str(sc)] = []
+            images = sc.glob('**/*.jpg')
+            for img in images:
+                m, s, o = get_edge_power(str(img), filter='scharr', color=True, visualize=False)
+                result[str(c)][str(sc)].append({
+                'source':images,
+                'mean':m,
+                'sum':s,
+                'overall':o
+                })
+                
+    with open('edge_power.json', 'w') as fp:
+        json.dump(result, fp)
+        
+    return result

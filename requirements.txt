@@ -2,3 +2,4 @@ cv2
 skimage.segmentation
 scipy
 matplotlib
+json
