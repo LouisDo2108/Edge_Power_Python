@@ -4,7 +4,8 @@ from skimage.segmentation import find_boundaries
 from copy import deepcopy
 from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
-import json
+import pandas as pd
+from tqdm.notebook import tqdm
 
 
 def show_visualize(imgray, maskgray, thick, normal_vector, edge_element, grid, interpolate):
@@ -91,7 +92,7 @@ def read_image(img_path):
     return img, imgray, maskgray, thick
 
 
-def get_edge_power(img_path, filter='scharr', interpolate='cubic', color=False, visualize=True):
+def get_edge_power(img_path, filter='scharr', interpolate='cubic', color=False, visualize=True, verbose=True):
 
     # Read image and its mask
     img, imgray, maskgray, thick = read_image(img_path)
@@ -137,34 +138,26 @@ def get_edge_power(img_path, filter='scharr', interpolate='cubic', color=False, 
     # else:
     #     grid = grid_z0
     edge_power_mean, edge_power_sum = calculate_edge_power(thick, grid)
-    print('{}: mean: {:.4f}, sum: {:.4f}, overall: {:.4f}'.format(
-        interpolate, edge_power_mean, edge_power_sum, edge_power_mean*edge_power_sum))
+    if verbose:
+        print('{}: mean: {:.4f}, sum: {:.4f}, overall: {:.4f}'.format(
+            interpolate, edge_power_mean, edge_power_sum, edge_power_mean*edge_power_sum))
 
-    return edge_power_mean, edge_power_sum, edge_power_mean*edge_power_sum
+    return np.round(edge_power_mean, 4), np.round(edge_power_sum, 4), np.round(edge_power_mean*edge_power_sum, 4)
 
 def get_edge_power_json(p):
+
     cat = [x for x in p.iterdir() if x.is_dir()]
+    result = []
 
-    result = {}
-
-    for c in cat:
-        if str(c) not in result:
-            result[str(c)] = {}
+    for c in tqdm(cat):
         subcat = [x for x in c.iterdir() if x.is_dir()]
-        for sc in subcat:
-            if str(sc) not in result[str(c)]:
-                result[str(c)][str(sc)] = []
+        for sc in tqdm(subcat):
             images = sc.glob('**/*.jpg')
             for img in images:
-                m, s, o = get_edge_power(str(img), filter='scharr', color=True, visualize=False)
-                result[str(c)][str(sc)].append({
-                'source':images,
-                'mean':m,
-                'sum':s,
-                'overall':o
-                })
-                
-    with open('edge_power.json', 'w') as fp:
-        json.dump(result, fp)
-        
+                m, s, o = get_edge_power(str(img), filter='scharr', color=True, visualize=False, verbose=False)
+                temp = {'Name':str(img.stem), 'Category': str(c.stem), 'Sub_category': str(sc.stem), 'Mean':m, 'Sum':s, 'Overall':o}
+                result.append(temp)
+    
+    result = pd.DataFrame(result)
+    result.to_csv('result.csv', index=False)
     return result

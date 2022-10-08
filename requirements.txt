@@ -3,3 +3,4 @@ skimage.segmentation
 scipy
 matplotlib
 json
+tqdm
