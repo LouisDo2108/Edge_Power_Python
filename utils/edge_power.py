@@ -26,26 +26,20 @@ def show_visualize(imgray, maskgray, thick, normal_vector, edge_element, grid_z0
     plt.imshow(temp_edge_element, cmap='gray')
     plt.title('edge_element')
     plt.subplot(246)
-    plt.imshow(grid_z0.T, extent=(0, 255, 0, 255), origin='lower', cmap='gray')
+    plt.imshow(np.flip(grid_z0.T, 0), extent=(0, 255, 0, 255), cmap='gray')
     plt.title('Nearest')
     plt.subplot(247)
-    plt.imshow(grid_z1.T, extent=(0, 255, 0, 255), origin='lower', cmap='gray')
+    plt.imshow(np.flip(grid_z1.T, 0), extent=(0, 255, 0, 255), cmap='gray')
     plt.title('Linear')
     plt.subplot(248)
-    plt.imshow(grid_z2.T, extent=(0, 255, 0, 255), origin='lower', cmap='gray')
+    plt.imshow(np.flip(grid_z2.T, 0), extent=(0, 255, 0, 255), cmap='gray')
     plt.title('Cubic')
     plt.gcf().set_size_inches(16, 8)
     plt.show()
 
 
-def calculate_edge_power(points, grid_z2):
-    values = []
-    edge_vector = grid_z2
-    for boundary_pixel in points:
-        x, y = boundary_pixel
-        value = edge_vector.T[256-y][x]
-        values.append(value)
-    values = np.array(values)
+def calculate_edge_power(thick, grid_z2):
+    values = thick*np.flip(grid_z2.T, 0)
     edge_power_mean = np.mean(np.square(values))
     edge_power_sum = np.sum(np.square(values))
     return edge_power_mean, edge_power_sum
@@ -59,7 +53,6 @@ def interpolate_edge_vector(points, values):
                        method='linear', fill_value=0, rescale=True)
     grid_z2 = griddata(points, values, (grid_x, grid_y),
                        method='cubic', fill_value=0, rescale=True)
-
     return grid_z0, grid_z1, grid_z2
 
 
@@ -96,18 +89,19 @@ def correct_normal_vector_orientation(dx, dy, normal_vector):
 def read_image(img_path):
     mask_path = img_path[:-3] + 'png'
     image = cv2.imread(img_path)
+    img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     imgray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     imgray = cv2.resize(imgray, (256, 256))
     mask = cv2.imread(mask_path)
     maskgray = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
     maskgray = cv2.resize(maskgray, (256, 256))
     thick = find_boundaries(maskgray, mode='thick')
-    return imgray, maskgray, thick
+    return img, imgray, maskgray, thick
 
-def get_edge_power(img_path, filter='scharr', visualize=True):
+def get_edge_power(img_path, color=False, filter='scharr', visualize=True):
 
     # Read image and its mask
-    imgray, maskgray, thick = read_image(img_path)
+    img, imgray, maskgray, thick = read_image(img_path)
 
     # Get the image's normal vector
     if filter == 'steering':
@@ -128,17 +122,21 @@ def get_edge_power(img_path, filter='scharr', visualize=True):
 
     # Calculate edge element
     edge_element = get_edge_element(thick, normal_vector)
-
     # Get all edge vectors
     points, values = get_edge_vectors(thick, edge_element)
-
     # Interpolate edge vectors
     grid_z0, grid_z1, grid_z2 = interpolate_edge_vector(points, values)
 
-    edge_power_mean, edge_power_sum = calculate_edge_power(points, grid_z2)
-
     if visualize:
-        show_visualize(imgray, maskgray, thick, normal_vector,
+        if color:
+            image = img
+        else:
+            image = imgray
+        show_visualize(image, maskgray, thick, normal_vector,
                        edge_element, grid_z0, grid_z1, grid_z2)
-    print('mean:', edge_power_mean)
-    print('sum:', edge_power_sum)
+    edge_power_mean, edge_power_sum = calculate_edge_power(thick, grid_z0)
+    print('Nearest: mean: {:.4f}, sum: {:.4f}, overall: {:.4f}'.format(edge_power_mean, edge_power_sum, edge_power_mean*edge_power_sum))
+    edge_power_mean, edge_power_sum = calculate_edge_power(thick, grid_z1)
+    print('Nearest: mean: {:.4f}, sum: {:.4f}, overall: {:.4f}'.format(edge_power_mean, edge_power_sum, edge_power_mean*edge_power_sum))
+    edge_power_mean, edge_power_sum = calculate_edge_power(thick, grid_z2)
+    print('Nearest: mean: {:.4f}, sum: {:.4f}, overall: {:.4f}'.format(edge_power_mean, edge_power_sum, edge_power_mean*edge_power_sum))
